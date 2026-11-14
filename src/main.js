@@ -131,7 +131,7 @@ ground.rotation.x = -Math.PI / 2; ground.position.set(0, -1, -5000); ground.rece
 box(0, 4, 30000, 8, 400, '#a59e98', 300);
 // Building: the Meshy building model, stacked 3x up the 60 m wall (lower copies clipped below their roofs).
 renderer.localClippingEnabled = true;
-const BLD_FACADE = 0.72;      // fraction of the model's height below its roofline
+const BLD_FACADE = 0.68;      // fraction of the model's height below its roofline
 box(0, ROOF_Y - 8, BUILDING_HALF_W * 2 + 30, 16, 300, '#7a3f2c', WALL_Z + 15);
 // Front entrance
 box(0, -70, 120, 140, 6, '#5a3a22', WALL_Z + 2);
@@ -148,7 +148,7 @@ const sign = textSprite('PENTHOUSE', 160, 26, '#2b2b2b', '#ffd23f');
 sign.position.set(door.x, -(door.y - door.h / 2 - 28), 2); scene.add(sign);
 
 // Holds stick out of the wall up to the play plane (z = 0) and cast shadows on it.
-const HOLD_COLORS = { sill: '#f2efe8', ledge: '#c9c3b5', pipe: '#4a5a4f', railing: '#3a3a3a' };
+const HOLD_COLORS = { sill: '#f2efe8', ledge: '#c9c3b5', pipe: '#4f7a66', railing: '#3a3a3a' };
 for (const h of level.holds) {
   box(h.x, h.y, h.w, h.h, h.type === 'pipe' ? 12 : -WALL_Z, HOLD_COLORS[h.type], h.type === 'pipe' ? WALL_Z + 12 : 0, { cast: true });
   if (h.type === 'railing') {
@@ -183,19 +183,27 @@ function animate(root, clips, name, timeScale = 1) {
 }
 loader.load(asset('building.glb'), (g) => {
   const bb = new THREE.Box3().setFromObject(g.scene), size = bb.getSize(new THREE.Vector3());
-  const COPIES = 3, seg = BUILDING_HEIGHT / COPIES, sy = seg / BLD_FACADE / size.y, sx = (BUILDING_HALF_W * 2 + 20) / size.x;
+  // Upper copies skip the model's ground-floor base so the stacked facade reads as one building.
+  const COPIES = 3, BASE = 0.09, hc = BUILDING_HEIGHT / (COPIES * BLD_FACADE - (COPIES - 1) * BASE);
+  const sy = hc / size.y, sx = (BUILDING_HALF_W * 2 + 20) / size.x;
+  let seam = 0;
   for (let i = 0; i < COPIES; i++) {
+    const y0 = i === 0 ? 0 : seam - BASE * hc;
     const m = g.scene.clone(true);
     m.scale.set(sx, sy, sx);
-    m.position.set(-(bb.min.x + size.x / 2) * sx, i * seg - bb.min.y * sy, WALL_Z - bb.max.z * sx);
-    const clip = i < COPIES - 1 ? [new THREE.Plane(new THREE.Vector3(0, -1, 0), (i + 1) * seg)] : null;
+    m.position.set(-(bb.min.x + size.x / 2) * sx, y0 - bb.min.y * sy, WALL_Z - bb.max.z * sx);
+    const clip = [];
+    if (i > 0) clip.push(new THREE.Plane(new THREE.Vector3(0, 1, 0), -seam));
+    const top = y0 + BLD_FACADE * hc;
+    if (i < COPIES - 1) clip.push(new THREE.Plane(new THREE.Vector3(0, -1, 0), top));
     m.traverse((o) => {
       if (!o.isMesh) return;
       o.receiveShadow = true;
-      if (clip) { o.material = o.material.clone(); o.material.clippingPlanes = clip; }
+      if (clip.length) { o.material = o.material.clone(); o.material.clippingPlanes = clip; }
     });
     scene.add(m);
-    if (i > 0) box(0, -i * seg, BUILDING_HALF_W * 2 + 24, 22, 40, '#8a4a38', WALL_Z + 6);  // band hides the seam
+    if (i > 0) box(0, -seam, BUILDING_HALF_W * 2 + 24, 30, 40, '#8a4a38', WALL_Z + 6);  // band hides the seam
+    seam = top;
   }
   for (const s of skyline.filter((s) => s.z < -2400).slice(0, 4)) {
     const m = fitModel(g.scene.clone(), Math.min(2600, s.h * 0.7), false);
@@ -224,7 +232,7 @@ loader.load(asset('character.glb'), (g) => {
 }, undefined, () => {});
 // Show the animated character where physics isn't in control (title / delivered).
 function syncModels() {
-  for (const { body, mesh } of meshes) mesh.visible = !models.climber || body.kind === 'pizza' || body.kind === 'hand';
+  for (const { body, mesh } of meshes) mesh.visible = !models.climber || body.kind === 'pizza';
 }
 
 const _a = new THREE.Vector3(), _c = new THREE.Vector3(), _t = new THREE.Vector3();
@@ -295,13 +303,13 @@ let gripChangeT = 0, elapsed = 0, fallTimer = 0, fallPlayed = false, ruinTimer =
 
 // Ragdoll visuals use the character model's colours (red jersey, dark trousers/gloves, white cap).
 const HAND_COLOR = '#3a3a3e', GRIP_COLOR = '#ffd23f';
-const CHAR_H = 165, HEAD_DROP = 8, MODEL_Z = 34;
+const CHAR_H = 165, HEAD_DROP = 8, MODEL_Z = 60;
 function bodyMesh(body) {
   const w = body.bounds.max.x - body.bounds.min.x, h = body.bounds.max.y - body.bounds.min.y;
   const colors = { torso: '#c8102e', head: '#e8b48f', arm: w >= 10 ? '#c8102e' : '#e8b48f', hand: HAND_COLOR, leg: '#2b2b30', shoe: '#1d1d22', pizza: '#c8a165' };
   const color = colors[body.kind] || '#ff00ff';
   const depth = { torso: 26, pizza: 54, leg: 14, shoe: 13, arm: 10 }[body.kind] || 12;
-  const z = { pizza: 14, torso: 10, head: 12 }[body.kind] || 16;
+  const z = { pizza: MODEL_Z, torso: 10, head: 12 }[body.kind] || 16;
   let geo;
   if (body.circleRadius) geo = new THREE.SphereGeometry(body.circleRadius, 12, 8);
   else if (body.kind === 'head') geo = new THREE.SphereGeometry(w / 2 + 1, 16, 12);
