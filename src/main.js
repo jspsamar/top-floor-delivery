@@ -11,7 +11,7 @@ const VIEW_H = 900;            // visible world height in px (~11 m)
 const HAND_K = 0.00012;        // hand pull per px of distance (in g)
 const HAND_MAX = 0.0032;       // max hand pull (in g * arm mass)
 const BODY_K = 0.00003;        // torso pull while gripping
-const BODY_MAX = 0.0012;      // max torso pull (fraction of g * total mass)
+const BODY_MAX = 0.0014;      // max torso pull (fraction of g * total mass)
 const GRAB_PAD = 6;
 
 loadSound('grab', { volume: 0.7 });
@@ -103,7 +103,7 @@ const HOLD_COLORS = { sill: '#f2efe8', ledge: '#c9c3b5', pipe: '#4a5a4f', railin
 for (const h of level.holds) {
   rect(h.x, h.y, h.w, h.h, HOLD_COLORS[h.type], 2);
   if (h.type === 'railing') {
-    for (let x = -BUILDING_HALF_W; x <= BUILDING_HALF_W; x += 40) rect(x, ROOF_Y - 25, 4, 50, '#3a3a3a', 2);
+    for (let x = -BUILDING_HALF_W; x <= BUILDING_HALF_W; x += 40) rect(x, ROOF_Y - 20, 4, 40, '#3a3a3a', 2);
   }
 }
 
@@ -157,7 +157,7 @@ function bodyMesh(body) {
   return { body, mesh: m };
 }
 
-function reset() {
+function reset(start = level.holds[0]) {
   for (const { mesh } of meshes) scene.remove(mesh);
   engine = Engine.create();
   engine.positionIterations = 10;
@@ -166,14 +166,14 @@ function reset() {
   Composite.add(world, Bodies.rectangle(0, 50, 20000, 100, {
     isStatic: true, friction: 1, collisionFilter: { category: CAT.WORLD, mask: 0xffff },
   }));
-  climber = createClimber(world, 0, START_HOLD_Y + 82);
+  climber = createClimber(world, start.x, start.y + 82);
   pizza = createPizza(world, climber.head);
   meshes = [...climber.bodies, pizza].map(bodyMesh);
   grips = { left: null, right: null };
   held = { left: true, right: true };   // start hanging; first release lets go
   tryGrip('left', true); tryGrip('right', true);
   elapsed = 0; fallTimer = 0; fallPlayed = false; ruinTimer = 0;
-  camera.position.y = -START_HOLD_Y;
+  camera.position.y = -start.y;
 }
 
 function startGame() {
@@ -236,7 +236,7 @@ function step() {
     if (anchors.length) {
       // Pull-up strength fades as the torso rises to the grip, so you can't vault over it.
       const below = torso.position.y - Math.min(...anchors);
-      const k = Math.max(0, Math.min(1, (below - 10) / 50));
+      const k = Math.max(0, Math.min(1, below / 45));
       pull(torso, m.x, m.y, BODY_K, BODY_MAX * k, climber.totalMass);
     }
     elapsed += STEP;
@@ -265,9 +265,9 @@ function step() {
     if (height > best) best = height;
 
     const dx = pizza.position.x - head.position.x;
-    if (pizza.position.y > head.position.y + 12 || Math.abs(dx) > 70) return ruin();
+    if ((pizza.position.y > head.position.y + 12 || Math.abs(dx) > 70) && !window.__tfdNoRuin) return ruin();
 
-    if (Math.abs(head.position.x - door.x) < door.w / 2 + 70 && head.position.y < ROOF_Y + 30) return deliver();
+    if (Math.abs(head.position.x - door.x) < door.w / 2 + 70 && head.position.y < ROOF_Y + 60) return deliver();
   } else if (state === 'ruined') {
     ruinTimer += STEP;
     if (ruinTimer > 2200) startGame();
@@ -343,6 +343,6 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 if (import.meta.env.DEV) {
-  window.__tfd = { get state() { return state; }, get climber() { return climber; }, get pizza() { return pizza; }, get grips() { return grips; }, level, mouseWorld,
+  window.__tfd = { get state() { return state; }, get climber() { return climber; }, get pizza() { return pizza; }, get grips() { return grips; }, level, mouseWorld, startAt: (i) => { reset(typeof i === 'number' ? level.holds[i] : i); state = 'playing'; overlay.classList.add('hidden'); },
     worldToScreen: (x, y) => ({ x: ((x - camera.position.x - camera.left) / (camera.right - camera.left)) * window.innerWidth, y: ((camera.position.y + camera.top + y) / (camera.top - camera.bottom)) * window.innerHeight }) };
 }

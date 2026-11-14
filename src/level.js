@@ -28,9 +28,9 @@ export function generateLevel(seed = 7) {
 
   let x = 0;
   let y = START_HOLD_Y;
-  while (y > ROOF_Y + 150) {
+  while (y > ROOF_Y + 80) {
     const t = Math.min(1, -y / BUILDING_HEIGHT);
-    y -= lerp(55, 85, t) + rnd() * lerp(5, 15, t);
+    y -= lerp(50, 78, t) + rnd() * lerp(5, 12, t);
     const dir = rnd() < 0.5 ? -1 : 1;
     x += dir * lerp(20, 110, t) * (0.5 + rnd() * 0.5);
     if (x > maxX) x = 2 * maxX - x;
@@ -55,7 +55,7 @@ export function generateLevel(seed = 7) {
   }
 
   // Roof railing running along the top of the building.
-  holds.push({ type: 'railing', x: 0, y: ROOF_Y - 50, w: BUILDING_HALF_W * 2, h: 10 });
+  holds.push({ type: 'railing', x: 0, y: ROOF_Y - 40, w: BUILDING_HALF_W * 2, h: 10 });
 
   const doorX = Math.max(-maxX + 60, Math.min(maxX - 60, x + (rnd() < 0.5 ? -1 : 1) * 160));
   const door = { x: doorX, y: ROOF_Y - 70, w: 80, h: 140 };
