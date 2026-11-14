@@ -6,7 +6,7 @@ export const BUILDING_HALF_W = 520;
 export const FLOOR_H = 3 * SCALE;
 export const START_HOLD_Y = -220;
 // x of the green drainpipes on the building model, so pipe holds sit on them.
-export const BUILDING_PIPES_X = [-111, 205];
+export const BUILDING_PIPES_X = [-110, 240];
 
 function mulberry32(seed) {
   return () => {
@@ -39,12 +39,12 @@ export function generateLevel(seed = 7) {
     if (x < -maxX) x = -2 * maxX - x;
 
     const r = rnd();
-    const pipeX = BUILDING_PIPES_X.reduce((p, q) => (Math.abs(q - x) < Math.abs(p - x) ? q : p));
-    if (r < lerp(0.3, 0.12, t) && Math.abs(pipeX - x) < 60) {
-      const h = lerp(190, 90, t);
-      holds.push({ type: 'pipe', x: pipeX, y: y + h / 2 - 10, w: 12, h });
-    } else if (r < lerp(0.3, 0.12, t)) {
+    if (r < lerp(0.3, 0.12, t)) {
       holds.push({ type: 'ledge', x, y: y - 10, w: lerp(200, 110, t), h: 16 });
+      // Bonus grab on the nearest drainpipe of the building model.
+      const pipeX = BUILDING_PIPES_X.reduce((p, q) => (Math.abs(q - x) < Math.abs(p - x) ? q : p));
+      const h = lerp(190, 90, t);
+      if (Math.abs(pipeX - x) < 160) holds.push({ type: 'pipe', x: pipeX, y: y + h / 2 - 10, w: 12, h });
     } else if (r < lerp(0.5, 0.2, t)) {
       holds.push({ type: 'ledge', x, y, w: lerp(320, 160, t), h: 16 });
     } else {
