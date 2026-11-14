@@ -1,0 +1,12 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: #8ec5ff; font-family: system-ui, sans-serif; user-select: none; }
+canvas { display: block; cursor: crosshair; }
+.hidden { display: none !important; }
+#hud { position: fixed; top: 12px; left: 12px; color: #fff; font-size: 20px; text-shadow: 0 2px 3px #0008; line-height: 1.4; pointer-events: none; }
+#help { position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; color: #fff; font-size: 14px; text-shadow: 0 1px 2px #000a; pointer-events: none; }
+#overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0006; color: #fff; text-align: center; }
+#overlay h1 { font-size: 64px; margin: 0 0 12px; color: #ffd23f; text-shadow: 0 4px 0 #b3401a, 0 8px 12px #0008; }
+#overlay .sub { font-size: 20px; margin: 0 0 24px; }
+#overlay .big { font-size: 22px; margin: 6px 0; }
+#overlay .stars { font-size: 48px; color: #ffd23f; letter-spacing: 6px; margin: 10px 0; }
+#overlay .blink { font-size: 26px; animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { to { visibility: hidden; } }
