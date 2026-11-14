@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import Matter from 'matter-js';
 import { createClimber, createPizza, CAT } from './climber.js';
 import { generateLevel, SCALE, ROOF_Y, BUILDING_HEIGHT, BUILDING_HALF_W, FLOOR_H, START_HOLD_Y } from './level.js';
@@ -27,31 +29,71 @@ loadSound('music', { loop: true, volume: 0.4 });
 // ---------- Three.js setup ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.prepend(renderer.domElement);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#8ec5ff');
-const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 100);
-camera.position.set(0, -START_HOLD_Y, 50);
+
+// Sunset sky gradient + light fog so distant layers fade.
+{
+  const c = document.createElement('canvas');
+  c.width = 2; c.height = 512;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0, '#2c3f7c'); grad.addColorStop(0.45, '#c0668a'); grad.addColorStop(0.75, '#f39a6b'); grad.addColorStop(1, '#ffd29a');
+  g.fillStyle = grad; g.fillRect(0, 0, 2, 512);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  scene.background = tex;
+}
+scene.fog = new THREE.Fog('#e98f78', 2600, 9000);
+
+// Side-on perspective camera, narrow FOV, slight downward tilt. Gameplay stays on the z = 0 plane.
+const FOV = 35, TILT = THREE.MathUtils.degToRad(4);
+const CAM_D = VIEW_H / 2 / Math.tan(THREE.MathUtils.degToRad(FOV / 2));
+const camera = new THREE.PerspectiveCamera(FOV, 1, 20, 20000);
+const focus = new THREE.Vector3(0, -START_HOLD_Y, 0);
+function placeCamera() {
+  camera.position.set(focus.x, focus.y + CAM_D * Math.tan(TILT), CAM_D);
+  camera.lookAt(focus);
+  camera.updateMatrixWorld();
+}
+placeCamera();
 
 function resize() {
-  const aspect = window.innerWidth / window.innerHeight;
-  camera.left = (-VIEW_H * aspect) / 2;
-  camera.right = (VIEW_H * aspect) / 2;
-  camera.top = VIEW_H / 2;
-  camera.bottom = -VIEW_H / 2;
+  camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 window.addEventListener('resize', resize);
 resize();
 
+// Lighting: warm low sunset sun with soft shadows on the wall, plus ambient fill.
+scene.add(new THREE.HemisphereLight('#ffe2c4', '#5a4a6a', 1.3));
+const sun = new THREE.DirectionalLight('#ffb27a', 2.4);
+const SUN_OFFSET = new THREE.Vector3(-700, 550, 650);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -900, right: 900, top: 900, bottom: -900, near: 10, far: 3000 });
+sun.shadow.bias = -0.0005;
+sun.shadow.radius = 4;
+scene.add(sun, sun.target);
+
 const matCache = {};
-const mat = (color) => (matCache[color] ??= new THREE.MeshBasicMaterial({ color }));
+const mat = (color) => (matCache[color] ??= new THREE.MeshStandardMaterial({ color, roughness: 0.9 }));
 // Matter y points down, Three y points up.
 function rect(x, y, w, h, color, z = 0, parent = scene) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat(color));
   m.position.set(x, -y, z);
   parent.add(m);
+  return m;
+}
+// A box whose front face sits at zFront and extends `d` back from it.
+function box(x, y, w, h, d, color, zFront = 0, { cast = false, receive = true } = {}) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
+  m.position.set(x, -y, zFront - d / 2);
+  m.castShadow = cast; m.receiveShadow = receive;
+  scene.add(m);
   return m;
 }
 
@@ -70,45 +112,119 @@ function textSprite(text, w, h, bg, fg) {
 // ---------- Static scenery ----------
 const level = generateLevel();
 
-// Background skyline
-for (let i = -6; i <= 6; i++) {
-  if (Math.abs(i) < 2) continue;
-  const h = 800 + ((i * 7919) % 5 + 5) % 5 * 500;
-  rect(i * 330, -h / 2, 300, h, '#6f9cc9', -5);
+const WALL_Z = -22;   // building face, right behind the climber
+
+// Far skyline: simple 3D blocks (plus the building model once loaded). Perspective gives the parallax.
+const skyline = [];
+for (let i = 0; i < 26; i++) {
+  const r = (n) => ((Math.sin(i * 12.9898 + n * 78.233) * 43758.5453) % 1 + 1) % 1;
+  const z = -1800 - r(1) * 3500, w = 300 + r(2) * 400, h = 1200 + r(3) * 4200;
+  const x = (i - 13) * 520 + r(4) * 200;
+  if (z > -2600 && Math.abs(x) < 900) continue;
+  skyline.push({ x, z, w, h });
+  box(x, -h / 2, w, h, w, ['#6b5a7e', '#7a6283', '#5d5674'][i % 3], z + w / 2, { receive: false });
 }
-rect(0, 400, 20000, 800, '#5b5b5b', -4);            // street
-rect(0, 30, 20000, 60, '#9a9a9a', -3);              // sidewalk
-// Building facade
-rect(0, -BUILDING_HEIGHT / 2, BUILDING_HALF_W * 2, BUILDING_HEIGHT, '#b5654a', -2);
-rect(0, ROOF_Y - 8, BUILDING_HALF_W * 2 + 30, 16, '#7a3f2c', -1);
+// Ground: street plane reaching into the distance, plus a sidewalk strip in front of the building.
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(30000, 12000), mat('#4d4a55'));
+ground.rotation.x = -Math.PI / 2; ground.position.set(0, -1, -5000); ground.receiveShadow = true; scene.add(ground);
+box(0, 4, 30000, 8, 400, '#a59e98', 300);
+// Building: a real box with depth, floor bands and inset windows.
+box(0, -BUILDING_HEIGHT / 2, BUILDING_HALF_W * 2, BUILDING_HEIGHT, 900, '#b5654a', WALL_Z);
+box(0, ROOF_Y - 8, BUILDING_HALF_W * 2 + 30, 16, 930, '#7a3f2c', WALL_Z + 15);
 for (let f = 0; f < BUILDING_HEIGHT / FLOOR_H; f++) {
   const fy = -f * FLOOR_H;
-  rect(0, fy - 4, BUILDING_HALF_W * 2, 8, '#9c5340', -1.5);
+  box(0, fy - 4, BUILDING_HALF_W * 2 + 8, 8, 12, '#9c5340', WALL_Z + 6);
   if (f === 0) continue;
   for (let c = -2; c <= 2; c++) {
-    rect(c * 200, fy - FLOOR_H / 2 - 10, 96, 126, '#e8e1d0', -1.4);
-    rect(c * 200, fy - FLOOR_H / 2 - 10, 84, 114, (f + c) % 3 ? '#2d4a6b' : '#f3d27a', -1.3);
+    rect(c * 200, fy - FLOOR_H / 2 - 10, 96, 126, '#e8e1d0', WALL_Z + 0.5).receiveShadow = true;
+    const lit = (f + c) % 3 === 0;
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(84, 114), lit
+      ? (matCache.lit ??= new THREE.MeshStandardMaterial({ color: '#f3d27a', emissive: '#c98a2a', emissiveIntensity: 0.6 }))
+      : mat('#2d4a6b'));
+    win.position.set(c * 200, -(fy - FLOOR_H / 2 - 10), WALL_Z + 1); win.receiveShadow = true; scene.add(win);
   }
 }
 // Front entrance
-rect(0, -70, 120, 140, '#5a3a22', -1);
-rect(0, -150, 140, 20, '#e8e1d0', -1);
+box(0, -70, 120, 140, 6, '#5a3a22', WALL_Z + 2);
+box(0, -150, 140, 20, 10, '#e8e1d0', WALL_Z + 6);
 const entrance = textSprite('APARTMENTS', 140, 18, '#e8e1d0', '#7a3f2c');
-entrance.position.set(0, 150, -0.9); scene.add(entrance);
+entrance.position.set(0, 150, WALL_Z + 6.5); scene.add(entrance);
 
 // Penthouse + door on the roof
 const { door } = level;
-rect(door.x, ROOF_Y - 100, 280, 200, '#efe6d2', -1);
-rect(door.x, door.y, door.w, door.h, '#6b3e1f', 1);
-rect(door.x + 26, door.y, 10, 10, '#ffd23f', 1.1);
+box(door.x, ROOF_Y - 100, 280, 200, 300, '#efe6d2', -2, { cast: true });
+box(door.x, door.y, door.w, door.h, 4, '#6b3e1f', 1);
+box(door.x + 26, door.y, 10, 10, 4, '#ffd23f', 3);
 const sign = textSprite('PENTHOUSE', 160, 26, '#2b2b2b', '#ffd23f');
-sign.position.set(door.x, -(door.y - door.h / 2 - 28), 1.1); scene.add(sign);
+sign.position.set(door.x, -(door.y - door.h / 2 - 28), 2); scene.add(sign);
 
+// Holds stick out of the wall up to the play plane (z = 0) and cast shadows on it.
 const HOLD_COLORS = { sill: '#f2efe8', ledge: '#c9c3b5', pipe: '#4a5a4f', railing: '#3a3a3a' };
 for (const h of level.holds) {
-  rect(h.x, h.y, h.w, h.h, HOLD_COLORS[h.type], 2);
+  box(h.x, h.y, h.w, h.h, h.type === 'pipe' ? 12 : -WALL_Z, HOLD_COLORS[h.type], h.type === 'pipe' ? WALL_Z + 12 : 0, { cast: true });
   if (h.type === 'railing') {
-    for (let x = -BUILDING_HALF_W; x <= BUILDING_HALF_W; x += 40) rect(x, ROOF_Y - 20, 4, 40, '#3a3a3a', 2);
+    for (let x = -BUILDING_HALF_W; x <= BUILDING_HALF_W; x += 40) box(x, ROOF_Y - 20, 4, 40, 4, '#3a3a3a', 0, { cast: true });
+  }
+}
+
+// ---------- GLB models (Meshy) ----------
+const loader = new GLTFLoader();
+const mixers = [];
+const models = {};
+const asset = (f) => `${import.meta.env.BASE_URL}assets/${f}`;
+// Scale a model so its height is `h` px, feet at its origin, centred in x/z.
+function fitModel(obj, h, shadows = true) {
+  obj.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(obj), size = b.getSize(new THREE.Vector3());
+  const s = h / size.y;
+  obj.scale.multiplyScalar(s);
+  const c = b.getCenter(new THREE.Vector3());
+  obj.position.set(-c.x * s, -b.min.y * s, -c.z * s);
+  const wrap = new THREE.Group();
+  wrap.add(obj);
+  obj.traverse((o) => { if (o.isMesh) { o.castShadow = shadows; if (o.isSkinnedMesh) o.frustumCulled = false; } });
+  return wrap;
+}
+function animate(root, clips, name, timeScale = 1) {
+  const mixer = new THREE.AnimationMixer(root);
+  const clip = clips.find((c) => c.name === name) || clips[0];
+  if (clip) mixer.clipAction(clip).setEffectiveTimeScale(timeScale).play();
+  mixers.push(mixer);
+  return mixer;
+}
+loader.load(asset('building.glb'), (g) => {
+  for (const s of skyline.filter((s) => s.z < -2400).slice(0, 6)) {
+    const m = fitModel(g.scene.clone(), Math.min(2600, s.h * 0.7), false);
+    m.position.set(s.x + s.w * 0.6, 0, s.z - 400);
+    scene.add(m);
+  }
+}, undefined, () => {});
+loader.load(asset('climber_hang.glb'), (g) => {
+  const m = fitModel(g.scene, 150);
+  m.position.set(level.holds[0].x, -level.holds[0].y - 150, -8);
+  animate(g.scene, g.animations, 'Grab_Wall_Midair_Idle');
+  models.title = m; scene.add(m); syncModels();
+}, undefined, () => {});
+loader.load(asset('character.glb'), (g) => {
+  const runner = fitModel(cloneSkinned(g.scene), 150);
+  runner.rotation.y = 0.5;
+  models.runMixer = animate(runner.children[0], g.animations, 'Running');
+  models.run = runner; scene.add(runner);
+  const cust = fitModel(cloneSkinned(g.scene), 150);
+  cust.position.set(door.x + 90, -ROOF_Y, -40);
+  cust.rotation.y = -0.4;
+  animate(cust.children[0], g.animations, 'Walking', 0.15);
+  models.customer = cust; scene.add(cust);
+  syncModels();
+}, undefined, () => {});
+// Show the animated character where physics isn't in control (title / delivered).
+function syncModels() {
+  const showRagdoll = state === 'playing' || state === 'ruined';
+  for (const { mesh } of meshes) mesh.visible = showRagdoll;
+  if (models.title) models.title.visible = state === 'title';
+  if (models.run) {
+    models.run.visible = state === 'delivered';
+    if (state === 'delivered') models.run.position.set(climber.head.position.x, -ROOF_Y, 10);
   }
 }
 
@@ -143,20 +259,29 @@ let held = { left: false, right: false };
 let mouse = { x: window.innerWidth / 2, y: window.innerHeight / 3 };
 let gripChangeT = 0, elapsed = 0, fallTimer = 0, fallPlayed = false, ruinTimer = 0, musicStarted = false;
 
+// Ragdoll visuals use the character model's colours (red jersey, dark trousers/gloves, white cap).
+const HAND_COLOR = '#3a3a3e', GRIP_COLOR = '#ffd23f';
 function bodyMesh(body) {
-  const colors = { torso: '#d6322b', head: '#f2c79a', arm: '#f2c79a', hand: '#f2c79a', leg: '#2a4d8f', shoe: '#22355e', pizza: '#c8a165' };
+  const w = body.bounds.max.x - body.bounds.min.x, h = body.bounds.max.y - body.bounds.min.y;
+  const colors = { torso: '#c8102e', head: '#e8b48f', arm: w >= 10 ? '#c8102e' : '#e8b48f', hand: HAND_COLOR, leg: '#2b2b30', shoe: '#1d1d22', pizza: '#c8a165' };
   const color = colors[body.kind] || '#ff00ff';
-  const z = body.kind === 'pizza' ? 6 : body.kind === 'torso' ? 5 : body.kind === 'head' ? 5.5 : 4;
+  const depth = { torso: 26, pizza: 54, leg: 14, shoe: 13, arm: 10 }[body.kind] || 12;
+  const z = { pizza: 14, torso: 10, head: 12 }[body.kind] || 16;
   let geo;
-  if (body.circleRadius) geo = new THREE.CircleGeometry(body.circleRadius, 16);
-  else geo = new THREE.PlaneGeometry(body.bounds.max.x - body.bounds.min.x, body.bounds.max.y - body.bounds.min.y);
-  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color }));
+  if (body.circleRadius) geo = new THREE.SphereGeometry(body.circleRadius, 12, 8);
+  else if (body.kind === 'head') geo = new THREE.SphereGeometry(w / 2 + 1, 16, 12);
+  else geo = new THREE.BoxGeometry(w, h, depth);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.8 }));
+  m.castShadow = true;
   m.position.z = z;
   if (body.kind === 'pizza') {
-    m.add(rect(0, 0, 50, 3, '#b8311f', 0.1, m));
+    m.add(rect(0, 0, w + 0.5, 3, '#b8311f', depth / 2 + 0.3, m));
   }
   if (body.kind === 'head') {
-    m.add(rect(0, -9, 26, 8, '#d6322b', 0.1, m));  // cap
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(w / 2 + 2, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat('#f2f2f2'));
+    cap.position.y = 2; m.add(cap);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(14, 3, 20), mat('#c8102e'));
+    brim.position.set(10, 3, 0); m.add(brim);
   }
   scene.add(m);
   return { body, mesh: m };
@@ -178,7 +303,8 @@ function reset(start = level.holds[0]) {
   held = { left: true, right: true };   // start hanging; first release lets go
   tryGrip('left', true); tryGrip('right', true);
   elapsed = 0; fallTimer = 0; fallPlayed = false; ruinTimer = 0; gripChangeT = 0;
-  camera.position.y = -start.y;
+  focus.y = -start.y;
+  syncModels();
 }
 
 function startGame() {
@@ -188,6 +314,7 @@ function startGame() {
   hud.classList.remove('hidden');
   help.classList.remove('hidden');
   if (!musicStarted) { play('music'); musicStarted = true; }
+  syncModels();
 }
 
 function tryGrip(side, silent = false) {
@@ -212,10 +339,14 @@ function release(side) {
   grips[side] = null;
 }
 
+// Cursor -> point on the z = 0 gameplay plane.
+const raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2(), hit = new THREE.Vector3();
+const PLAY_PLANE = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 function mouseWorld() {
-  const x = camera.position.x + camera.left + (mouse.x / window.innerWidth) * (camera.right - camera.left);
-  const y = camera.position.y + camera.top - (mouse.y / window.innerHeight) * (camera.top - camera.bottom);
-  return { x, y: -y };
+  ndc.set((mouse.x / window.innerWidth) * 2 - 1, -(mouse.y / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  if (!raycaster.ray.intersectPlane(PLAY_PLANE, hit)) return { x: focus.x, y: -focus.y };
+  return { x: hit.x, y: -hit.y };
 }
 
 function pull(body, tx, ty, k, max, mass, dampX = 0, dampY = dampX) {
@@ -293,6 +424,7 @@ function ruin() {
   release('left'); release('right');
   play('ruined');
   saveBest();
+  syncModels();
   showOverlay('<h1>PIZZA RUINED!</h1><p class="big">The customer is not going to tip for that.</p><p class="sub">Restarting…</p>');
 }
 
@@ -301,6 +433,7 @@ function deliver() {
   best = Math.max(best, BUILDING_HEIGHT / SCALE);
   saveBest();
   const stars = starsFor(elapsed);
+  syncModels();
   showOverlay(`<h1>DELIVERED!</h1>
     <p class="big">Time: <b>${fmtTime(elapsed)}</b></p>
     <div class="stars">${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}</div>
@@ -323,6 +456,7 @@ window.addEventListener('beforeunload', saveBest);
 // ---------- Loop ----------
 reset();
 let last = performance.now(), acc = 0;
+const clock = new THREE.Clock();
 function frame(now) {
   acc += Math.min(now - last, 100);
   last = now;
@@ -337,13 +471,18 @@ function frame(now) {
   }
   for (const side of ['left', 'right']) {
     const m = meshes.find((o) => o.body === climber.hands[side]);
-    m.mesh.material.color.set(grips[side] ? '#ffd23f' : '#f2c79a');
+    m.mesh.material.color.set(grips[side] ? GRIP_COLOR : HAND_COLOR);
   }
 
   const t = climber.torso.position;
   const targetY = Math.max(-t.y + 60, VIEW_H / 2 - 120);
-  camera.position.y += (targetY - camera.position.y) * 0.08;
-  camera.position.x += (t.x * 0.6 - camera.position.x) * 0.05;
+  focus.y += (targetY - focus.y) * 0.08;
+  focus.x += (t.x * 0.6 - focus.x) * 0.05;
+  placeCamera();
+  sun.target.position.copy(focus);
+  sun.position.copy(focus).add(SUN_OFFSET);
+  const dt = clock.getDelta();
+  for (const mx of mixers) mx.update(dt);
 
   $('hud-height').textContent = Math.max(0, -climber.head.position.y / SCALE).toFixed(1);
   $('hud-time').textContent = fmtTime(elapsed);
@@ -356,5 +495,5 @@ requestAnimationFrame(frame);
 
 if (import.meta.env.DEV) {
   window.__tfd = { get state() { return state; }, get climber() { return climber; }, get pizza() { return pizza; }, get grips() { return grips; }, level, mouseWorld, startAt: (i) => { reset(typeof i === 'number' ? level.holds[i] : i); state = 'playing'; overlay.classList.add('hidden'); },
-    worldToScreen: (x, y) => ({ x: ((x - camera.position.x - camera.left) / (camera.right - camera.left)) * window.innerWidth, y: ((camera.position.y + camera.top + y) / (camera.top - camera.bottom)) * window.innerHeight }) };
+    worldToScreen: (x, y) => { const v = new THREE.Vector3(x, -y, 0).project(camera); return { x: (v.x + 1) / 2 * window.innerWidth, y: (1 - v.y) / 2 * window.innerHeight }; } };
 }
