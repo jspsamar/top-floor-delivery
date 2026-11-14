@@ -73,7 +73,7 @@ scene.add(new THREE.HemisphereLight('#ffe2c4', '#5a4a6a', 1.3));
 const sun = new THREE.DirectionalLight('#ffb27a', 2.4);
 const SUN_OFFSET = new THREE.Vector3(-700, 550, 650);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(1024, 1024);
 Object.assign(sun.shadow.camera, { left: -900, right: 900, top: 900, bottom: -900, near: 10, far: 3000 });
 sun.shadow.bias = -0.0005;
 sun.shadow.radius = 4;
@@ -199,17 +199,17 @@ loader.load(asset('building.glb'), (g) => {
     scene.add(m);
   }
 }, undefined, () => {});
+// The climber: Meshy character playing its full climbing animation, carried by the ragdoll.
+// Only the arm bones are re-aimed each frame so the model's hands follow the physics hands.
 loader.load(asset('climber_hang.glb'), (g) => {
-  const m = fitModel(g.scene, 150);
-  m.position.set(level.holds[0].x, -level.holds[0].y - 150, -8);
+  const wrap = fitModel(g.scene, CHAR_H);
   animate(g.scene, g.animations, 'Grab_Wall_Midair_Idle');
-  models.title = m; scene.add(m); syncModels();
+  const b = (n) => g.scene.getObjectByName(n);
+  // Model faces the camera, so its right arm is on screen-left (the left-click hand).
+  models.climber = { wrap, head: b('Head'), arms: { left: [b('RightArm'), b('RightForeArm'), b('RightHand')], right: [b('LeftArm'), b('LeftForeArm'), b('LeftHand')] } };
+  scene.add(wrap); syncModels();
 }, undefined, () => {});
 loader.load(asset('character.glb'), (g) => {
-  const runner = fitModel(cloneSkinned(g.scene), 150);
-  runner.rotation.y = 0.5;
-  models.runMixer = animate(runner.children[0], g.animations, 'Running');
-  models.run = runner; scene.add(runner);
   const cust = fitModel(cloneSkinned(g.scene), 150);
   cust.position.set(door.x + 90, -ROOF_Y, -40);
   cust.rotation.y = -0.4;
@@ -219,12 +219,41 @@ loader.load(asset('character.glb'), (g) => {
 }, undefined, () => {});
 // Show the animated character where physics isn't in control (title / delivered).
 function syncModels() {
-  const showRagdoll = state === 'playing' || state === 'ruined';
-  for (const { mesh } of meshes) mesh.visible = showRagdoll;
-  if (models.title) models.title.visible = state === 'title';
-  if (models.run) {
-    models.run.visible = state === 'delivered';
-    if (state === 'delivered') models.run.position.set(climber.head.position.x, -ROOF_Y, 10);
+  for (const { body, mesh } of meshes) mesh.visible = !models.climber || body.kind === 'pizza' || body.kind === 'hand';
+}
+
+const _a = new THREE.Vector3(), _c = new THREE.Vector3(), _t = new THREE.Vector3();
+const _q = new THREE.Quaternion(), _wq = new THREE.Quaternion(), _pq = new THREE.Quaternion();
+// Rotate `bone` (in world space) so the direction to `child` points at (tx, ty) on the bone's own depth.
+function aimBone(bone, child, tx, ty) {
+  bone.getWorldPosition(_a); child.getWorldPosition(_c);
+  _c.sub(_a); _c.z = 0;
+  _t.set(tx - _a.x, ty - _a.y, 0);
+  if (_c.lengthSq() < 1e-6 || _t.lengthSq() < 1e-6) return;
+  _q.setFromUnitVectors(_c.normalize(), _t.normalize());
+  bone.getWorldQuaternion(_wq);
+  bone.parent.getWorldQuaternion(_pq);
+  bone.quaternion.copy(_pq.invert().multiply(_q.multiply(_wq)));
+  bone.updateMatrixWorld(true);
+}
+function updateClimberModel() {
+  const c = models.climber;
+  if (!c) return;
+  const { torso, head } = climber;
+  c.wrap.position.set(torso.position.x, -torso.position.y, 6);
+  c.wrap.rotation.z = -torso.angle;
+  c.wrap.updateMatrixWorld(true);
+  c.head.getWorldPosition(_a);
+  c.wrap.position.x += head.position.x - _a.x;
+  c.wrap.position.y += -head.position.y - HEAD_DROP - _a.y;
+  c.wrap.updateMatrixWorld(true);
+  for (const side of ['left', 'right']) {
+    const [upper, lower, hand] = climber.arms[side];
+    const [sh, el, wr] = c.arms[side];
+    if (!sh || !el || !wr) continue;
+    const ex = (upper.position.x + lower.position.x) / 2, ey = (upper.position.y + lower.position.y) / 2;
+    aimBone(sh, el, ex, -ey);
+    aimBone(el, wr, hand.position.x, -hand.position.y);
   }
 }
 
@@ -261,6 +290,7 @@ let gripChangeT = 0, elapsed = 0, fallTimer = 0, fallPlayed = false, ruinTimer =
 
 // Ragdoll visuals use the character model's colours (red jersey, dark trousers/gloves, white cap).
 const HAND_COLOR = '#3a3a3e', GRIP_COLOR = '#ffd23f';
+const CHAR_H = 165, HEAD_DROP = 8;
 function bodyMesh(body) {
   const w = body.bounds.max.x - body.bounds.min.x, h = body.bounds.max.y - body.bounds.min.y;
   const colors = { torso: '#c8102e', head: '#e8b48f', arm: w >= 10 ? '#c8102e' : '#e8b48f', hand: HAND_COLOR, leg: '#2b2b30', shoe: '#1d1d22', pizza: '#c8a165' };
@@ -483,6 +513,7 @@ function frame(now) {
   sun.position.copy(focus).add(SUN_OFFSET);
   const dt = clock.getDelta();
   for (const mx of mixers) mx.update(dt);
+  updateClimberModel();
 
   $('hud-height').textContent = Math.max(0, -climber.head.position.y / SCALE).toFixed(1);
   $('hud-time').textContent = fmtTime(elapsed);

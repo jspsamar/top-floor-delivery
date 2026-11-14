@@ -50,7 +50,7 @@ export function createClimber(world, x, y) {
   Composite.add(world, [...bodies, ...constraints]);
   const totalMass = bodies.reduce((m, b) => m + b.mass, 0);
   const armMass = (side) => arms[side].reduce((m, b) => m + b.mass, 0);
-  return { torso, head, hands, bodies, totalMass, armMass, handRadius: HR };
+  return { torso, head, hands, arms, bodies, totalMass, armMass, handRadius: HR };
 }
 
 export function createPizza(world, head) {
