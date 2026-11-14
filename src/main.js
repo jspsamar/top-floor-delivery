@@ -24,7 +24,8 @@ const MAX_RISE = 3.5;          // max upward torso speed while hanging (px/step)
 loadSound('grab', { volume: 0.7 });
 loadSound('fall');
 loadSound('ruined');
-loadSound('music', { loop: true, volume: 0.4 });
+loadSound('music', { loop: true, volume: 0.3 });
+loadSound('voice', { volume: 1 });   // delivery guy's grumbling monologue, once per page load
 
 // ---------- Three.js setup ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -244,7 +245,7 @@ function updateClimberModel() {
   const c = models.climber;
   if (!c) return;
   const { torso, head } = climber;
-  c.wrap.position.set(torso.position.x, -torso.position.y, 6);
+  c.wrap.position.set(torso.position.x, -torso.position.y, MODEL_Z);
   c.wrap.rotation.z = -torso.angle;
   c.wrap.updateMatrixWorld(true);
   c.head.getWorldPosition(_a);
@@ -294,7 +295,7 @@ let gripChangeT = 0, elapsed = 0, fallTimer = 0, fallPlayed = false, ruinTimer =
 
 // Ragdoll visuals use the character model's colours (red jersey, dark trousers/gloves, white cap).
 const HAND_COLOR = '#3a3a3e', GRIP_COLOR = '#ffd23f';
-const CHAR_H = 165, HEAD_DROP = 8;
+const CHAR_H = 165, HEAD_DROP = 8, MODEL_Z = 34;
 function bodyMesh(body) {
   const w = body.bounds.max.x - body.bounds.min.x, h = body.bounds.max.y - body.bounds.min.y;
   const colors = { torso: '#c8102e', head: '#e8b48f', arm: w >= 10 ? '#c8102e' : '#e8b48f', hand: HAND_COLOR, leg: '#2b2b30', shoe: '#1d1d22', pizza: '#c8a165' };
@@ -347,7 +348,7 @@ function startGame() {
   overlay.classList.add('hidden');
   hud.classList.remove('hidden');
   help.classList.remove('hidden');
-  if (!musicStarted) { play('music'); musicStarted = true; }
+  if (!musicStarted) { play('music'); play('voice'); musicStarted = true; }
   syncModels();
 }
 

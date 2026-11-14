@@ -4,3 +4,4 @@ Optional sound files. The game plays them if present and silently ignores missin
 - `fall.mp3` – climber has been falling for more than 1 second
 - `ruined.mp3` – the pizza fell off
 - `music.mp3` – background music (loops)
+- `voice.mp3` – delivery guy monologue, plays once when the first run starts
