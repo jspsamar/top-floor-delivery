@@ -128,22 +128,10 @@ for (let i = 0; i < 26; i++) {
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(30000, 12000), mat('#4d4a55'));
 ground.rotation.x = -Math.PI / 2; ground.position.set(0, -1, -5000); ground.receiveShadow = true; scene.add(ground);
 box(0, 4, 30000, 8, 400, '#a59e98', 300);
-// Building: a real box with depth, floor bands and inset windows.
-box(0, -BUILDING_HEIGHT / 2, BUILDING_HALF_W * 2, BUILDING_HEIGHT, 900, '#b5654a', WALL_Z);
-box(0, ROOF_Y - 8, BUILDING_HALF_W * 2 + 30, 16, 930, '#7a3f2c', WALL_Z + 15);
-for (let f = 0; f < BUILDING_HEIGHT / FLOOR_H; f++) {
-  const fy = -f * FLOOR_H;
-  box(0, fy - 4, BUILDING_HALF_W * 2 + 8, 8, 12, '#9c5340', WALL_Z + 6);
-  if (f === 0) continue;
-  for (let c = -2; c <= 2; c++) {
-    rect(c * 200, fy - FLOOR_H / 2 - 10, 96, 126, '#e8e1d0', WALL_Z + 0.5).receiveShadow = true;
-    const lit = (f + c) % 3 === 0;
-    const win = new THREE.Mesh(new THREE.PlaneGeometry(84, 114), lit
-      ? (matCache.lit ??= new THREE.MeshStandardMaterial({ color: '#f3d27a', emissive: '#c98a2a', emissiveIntensity: 0.6 }))
-      : mat('#2d4a6b'));
-    win.position.set(c * 200, -(fy - FLOOR_H / 2 - 10), WALL_Z + 1); win.receiveShadow = true; scene.add(win);
-  }
-}
+// Building: the Meshy building model, stacked 3x up the 60 m wall (lower copies clipped below their roofs).
+renderer.localClippingEnabled = true;
+const BLD_FACADE = 0.72;      // fraction of the model's height below its roofline
+box(0, ROOF_Y - 8, BUILDING_HALF_W * 2 + 30, 16, 300, '#7a3f2c', WALL_Z + 15);
 // Front entrance
 box(0, -70, 120, 140, 6, '#5a3a22', WALL_Z + 2);
 box(0, -150, 140, 20, 10, '#e8e1d0', WALL_Z + 6);
@@ -193,7 +181,22 @@ function animate(root, clips, name, timeScale = 1) {
   return mixer;
 }
 loader.load(asset('building.glb'), (g) => {
-  for (const s of skyline.filter((s) => s.z < -2400).slice(0, 6)) {
+  const bb = new THREE.Box3().setFromObject(g.scene), size = bb.getSize(new THREE.Vector3());
+  const COPIES = 3, seg = BUILDING_HEIGHT / COPIES, sy = seg / BLD_FACADE / size.y, sx = (BUILDING_HALF_W * 2 + 20) / size.x;
+  for (let i = 0; i < COPIES; i++) {
+    const m = g.scene.clone(true);
+    m.scale.set(sx, sy, sx);
+    m.position.set(-(bb.min.x + size.x / 2) * sx, i * seg - bb.min.y * sy, WALL_Z - bb.max.z * sx);
+    const clip = i < COPIES - 1 ? [new THREE.Plane(new THREE.Vector3(0, -1, 0), (i + 1) * seg)] : null;
+    m.traverse((o) => {
+      if (!o.isMesh) return;
+      o.receiveShadow = true;
+      if (clip) { o.material = o.material.clone(); o.material.clippingPlanes = clip; }
+    });
+    scene.add(m);
+    if (i > 0) box(0, -i * seg, BUILDING_HALF_W * 2 + 24, 22, 40, '#8a4a38', WALL_Z + 6);  // band hides the seam
+  }
+  for (const s of skyline.filter((s) => s.z < -2400).slice(0, 4)) {
     const m = fitModel(g.scene.clone(), Math.min(2600, s.h * 0.7), false);
     m.position.set(s.x + s.w * 0.6, 0, s.z - 400);
     scene.add(m);
@@ -203,10 +206,11 @@ loader.load(asset('building.glb'), (g) => {
 // Only the arm bones are re-aimed each frame so the model's hands follow the physics hands.
 loader.load(asset('climber_hang.glb'), (g) => {
   const wrap = fitModel(g.scene, CHAR_H);
+  g.scene.rotation.y = Math.PI;  // face the wall, back to the camera
+  g.scene.position.x *= -1; g.scene.position.z *= -1;
   animate(g.scene, g.animations, 'Grab_Wall_Midair_Idle');
   const b = (n) => g.scene.getObjectByName(n);
-  // Model faces the camera, so its right arm is on screen-left (the left-click hand).
-  models.climber = { wrap, head: b('Head'), arms: { left: [b('RightArm'), b('RightForeArm'), b('RightHand')], right: [b('LeftArm'), b('LeftForeArm'), b('LeftHand')] } };
+  models.climber = { wrap, head: b('Head'), arms: { left: [b('LeftArm'), b('LeftForeArm'), b('LeftHand')], right: [b('RightArm'), b('RightForeArm'), b('RightHand')] } };
   scene.add(wrap); syncModels();
 }, undefined, () => {});
 loader.load(asset('character.glb'), (g) => {
