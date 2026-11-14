@@ -30,7 +30,7 @@ export function generateLevel(seed = 7) {
   let y = START_HOLD_Y;
   while (y > ROOF_Y + 80) {
     const t = Math.min(1, -y / BUILDING_HEIGHT);
-    y -= lerp(50, 78, t) + rnd() * lerp(5, 12, t);
+    y -= lerp(50, 72, t) + rnd() * lerp(5, 10, t);
     const dir = rnd() < 0.5 ? -1 : 1;
     x += dir * lerp(20, 110, t) * (0.5 + rnd() * 0.5);
     if (x > maxX) x = 2 * maxX - x;

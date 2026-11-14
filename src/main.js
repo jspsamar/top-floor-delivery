@@ -11,8 +11,13 @@ const VIEW_H = 900;            // visible world height in px (~11 m)
 const HAND_K = 0.00012;        // hand pull per px of distance (in g)
 const HAND_MAX = 0.0032;       // max hand pull (in g * arm mass)
 const BODY_K = 0.00003;        // torso pull while gripping
-const BODY_MAX = 0.0014;      // max torso pull (fraction of g * total mass)
-const GRAB_PAD = 6;
+const BODY_MAX = 0.0012;      // max torso pull (fraction of g * total mass)
+const GRAB_PAD = 9;
+const HAND_DAMP = 0.00015;     // velocity damping on a reaching hand
+const BODY_DAMP_Y = 0.0003;    // vertical damping on the torso while hanging (stops the fling)
+const BODY_DAMP_X = 0.00006;   // light horizontal damping so swinging still works
+const PULL_RAMP = 450;         // ms for the pull-up to build after a grip change
+const MAX_RISE = 3.5;          // max upward torso speed while hanging (px/step)
 
 loadSound('grab', { volume: 0.7 });
 loadSound('fall');
@@ -136,7 +141,7 @@ let state = 'title';
 let grips = { left: null, right: null };
 let held = { left: false, right: false };
 let mouse = { x: window.innerWidth / 2, y: window.innerHeight / 3 };
-let elapsed = 0, fallTimer = 0, fallPlayed = false, ruinTimer = 0, musicStarted = false;
+let gripChangeT = 0, elapsed = 0, fallTimer = 0, fallPlayed = false, ruinTimer = 0, musicStarted = false;
 
 function bodyMesh(body) {
   const colors = { torso: '#d6322b', head: '#f2c79a', arm: '#f2c79a', hand: '#f2c79a', leg: '#2a4d8f', shoe: '#22355e', pizza: '#c8a165' };
@@ -172,7 +177,7 @@ function reset(start = level.holds[0]) {
   grips = { left: null, right: null };
   held = { left: true, right: true };   // start hanging; first release lets go
   tryGrip('left', true); tryGrip('right', true);
-  elapsed = 0; fallTimer = 0; fallPlayed = false; ruinTimer = 0;
+  elapsed = 0; fallTimer = 0; fallPlayed = false; ruinTimer = 0; gripChangeT = 0;
   camera.position.y = -start.y;
 }
 
@@ -213,31 +218,38 @@ function mouseWorld() {
   return { x, y: -y };
 }
 
-function pull(body, tx, ty, k, max, mass) {
+function pull(body, tx, ty, k, max, mass, dampX = 0, dampY = dampX) {
   const dx = tx - body.position.x, dy = ty - body.position.y;
-  const d = Math.hypot(dx, dy);
-  if (d < 1) return;
+  const d = Math.max(1, Math.hypot(dx, dy));
   const mag = Math.min(d * k, max) * mass;
-  Body.applyForce(body, body.position, { x: (dx / d) * mag, y: (dy / d) * mag });
+  Body.applyForce(body, body.position, {
+    x: (dx / d) * mag - body.velocity.x * dampX * mass,
+    y: (dy / d) * mag - body.velocity.y * dampY * mass,
+  });
 }
 
 function step() {
   const { torso, head, hands } = climber;
   if (state === 'playing') {
     for (const side of ['left', 'right']) {
-      if (held[side] && !grips[side]) tryGrip(side);
-      if (!held[side] && grips[side]) release(side);
+      if (held[side] && !grips[side]) { tryGrip(side); if (grips[side]) gripChangeT = 0; }
+      if (!held[side] && grips[side]) { release(side); gripChangeT = 0; }
     }
+    gripChangeT += STEP;
     const m = mouseWorld();
     for (const [side, off] of [['left', -10], ['right', 10]]) {
-      if (!grips[side]) pull(hands[side], m.x + off, m.y, HAND_K, HAND_MAX, climber.armMass(side));
+      if (!grips[side]) pull(hands[side], m.x + off, m.y, HAND_K, HAND_MAX, climber.armMass(side), HAND_DAMP);
     }
     const anchors = [grips.left, grips.right].filter(Boolean).map((g) => g.pointB.y);
     if (anchors.length) {
       // Pull-up strength fades as the torso rises to the grip, so you can't vault over it.
-      const below = torso.position.y - Math.min(...anchors);
-      const k = Math.max(0, Math.min(1, below / 45));
-      pull(torso, m.x, m.y, BODY_K, BODY_MAX * k, climber.totalMass);
+      const top = Math.min(...anchors);
+      const below = torso.position.y - top;
+      // Only pull up when the cursor is above the grip; otherwise just hang and swing.
+      const ty = m.y < top ? m.y : torso.position.y;
+      const k = Math.max(0, Math.min(1, below / 45)) * Math.min(1, gripChangeT / PULL_RAMP);
+      pull(torso, m.x, ty, BODY_K, BODY_MAX * k, climber.totalMass, BODY_DAMP_X, BODY_DAMP_Y);
+      if (torso.velocity.y < -MAX_RISE) Body.setVelocity(torso, { x: torso.velocity.x, y: -MAX_RISE });
     }
     elapsed += STEP;
   }
